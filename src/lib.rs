@@ -183,7 +183,7 @@ impl<'a> Iterator for ZipIterator<'a> {
     type Item = Result<ZipEntry, MZError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // self.file.seek(SeekFrom::Start(self.end_rec.central_directory_offset as u64)).unwrap();
+        
         if self.next_entry > self.end_rec.num_entries {
             panic!("wtf");
         }
@@ -244,7 +244,7 @@ impl<'a> Iterator for ZipIterator<'a> {
         match self.record_callback(&header) {
             Ok(buffer) => {
                 // yo wtf is this
-                let filename = <Option<String> as Clone>::clone(&self.filename).unwrap();
+                let filename = self.filename.as_ref().unwrap().clone();
                 self.next_entry += 1;
                 Some(Ok(ZipEntry {
                     header,
