@@ -11,11 +11,7 @@ fn main() {
     }
 
     let mut input = File::open(args.nth(1).unwrap()).unwrap();
-    let zi = munzip::ZipIterator::new(&mut input).unwrap();
+    let mut zi = munzip::Archive::new(&mut input).unwrap();
 
-    for item in zi {
-        let item = item.unwrap();
-
-        write::write_file(item.filename(), item.buffer()).unwrap();
-    }
+    zi.by_name("farts").unwrap();
 }

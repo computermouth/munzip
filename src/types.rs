@@ -76,6 +76,15 @@ pub struct JZFileHeader {
 }
 
 #[repr(packed)]
+#[derive(Debug)]
+pub struct JZInternalHeader {
+    pub compressed_size: u32,
+    pub uncompressed_size: u32,
+    pub compression_method: u16,
+    pub offset: u32,
+}
+
+#[repr(packed)]
 #[derive(Debug, Copy, Clone)]
 pub struct JZEndRecord {
     pub signature: u32,

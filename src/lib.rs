@@ -132,7 +132,7 @@ fn jz_read_local_file_header_raw(zip: &mut File) -> Result<(JZLocalFileHeader, S
 
 pub struct Archive<'a> {
     file: &'a mut File,
-    map: Option<HashMap<String, u16>>,
+    map: Option<HashMap<String, JZInternalHeader>>,
     end_rec: JZEndRecord,
 }
 
@@ -149,15 +149,70 @@ impl<'a> Archive<'a> {
         })
     }
 
+    fn next_header(&mut self) -> Result<(JZInternalHeader, String), MZError> {
+        const GFH_SIZE: usize = std::mem::size_of::<JZGlobalFileHeader>();
+        let mut fh_buff: [u8; GFH_SIZE] = [0; GFH_SIZE];
+        self.file.read_exact(&mut fh_buff)?;
+
+        let gfh = get_global_file_header(&fh_buff)?;
+        let last_pos = self.file.stream_position()?;
+
+        // seek to local
+        self.file
+            .seek(SeekFrom::Start(gfh.relative_offset_of_local_header as u64))?;
+
+        const LFH_SIZE: usize = std::mem::size_of::<JZLocalFileHeader>();
+        let mut fh_buff: [u8; LFH_SIZE] = [0; LFH_SIZE];
+        self.file.read_exact(&mut fh_buff)?;
+
+        let lfh = get_internal_file_header(&fh_buff)?;
+
+        let mut filename_buf = vec![0; lfh.file_name_length as usize];
+        self.file.read_exact(&mut filename_buf)?;
+        let filename = std::str::from_utf8(&filename_buf)?.to_string();
+
+        if lfh.extra_field_length != 0 {
+            self.file
+                .seek(SeekFrom::Current(lfh.extra_field_length as i64))?;
+        }
+
+        let jzih = JZInternalHeader {
+            compressed_size: lfh.compressed_size,
+            uncompressed_size: lfh.uncompressed_size,
+            compression_method: lfh.compression_method,
+            offset: self.file.stream_position()? as u32,
+        };
+
+        // rewind to GFH
+        self.file.seek(SeekFrom::Start(last_pos))?;
+
+        // skip filename and comments
+        let skip_len: i64 = gfh.file_name_length as i64
+            + gfh.extra_field_length as i64
+            + gfh.file_comment_length as i64;
+
+        self.file.seek(SeekFrom::Current(skip_len))?;
+
+        Ok((jzih, filename))
+    }
+
     fn build_map(&mut self) -> Result<(), MZError> {
-        let map = HashMap::new();
+        let mut map = HashMap::new();
+
+        for _ in 0..self.end_rec.num_entries {
+            let (header, filename) = self.next_header()?;
+            eprintln!("{filename}");
+            map.insert(filename, header);
+        }
 
         self.map = Some(map);
         Ok(())
     }
 
-    pub fn by_name(&mut self) -> Result<Option<Vec<u8>>, MZError> {
-        if self.map == None {}
+    pub fn by_name(&mut self, name: &str) -> Result<Option<Vec<u8>>, MZError> {
+        if self.map.is_none() {
+            self.build_map()?;
+        }
 
         Ok(None)
     }
@@ -212,6 +267,52 @@ impl<'a> ZipIterator<'a> {
     }
 }
 
+fn get_global_file_header(buf: &[u8]) -> Result<JZGlobalFileHeader, MZError> {
+    let file_header: JZGlobalFileHeader = unsafe { std::ptr::read(buf.as_ptr() as *const _) };
+
+    if file_header.signature != JZ_GLOBAL_FILE_HEADER_SIGNATURE {
+        return Err(MZError("invalid global file header signature".to_string()));
+    }
+
+    if file_header.file_name_length as usize + 1 >= JZ_BUFFER_SIZE {
+        return Err(MZError("file name too long".to_string()));
+    }
+
+    Ok(file_header)
+}
+
+fn get_internal_file_header(buf: &[u8]) -> Result<JZLocalFileHeader, MZError> {
+    let file_header: JZLocalFileHeader = unsafe { std::ptr::read(buf.as_ptr() as *const _) };
+
+    if file_header.signature != JZ_LOCAL_FILE_HEADER_SIGNATURE {
+        return Err(MZError("invalid local file header signature".to_string()));
+    }
+
+    if file_header.file_name_length as usize + 1 >= JZ_BUFFER_SIZE {
+        return Err(MZError("file name too long".to_string()));
+    }
+
+    if file_header.compression_method == 0
+        && file_header.compressed_size != file_header.uncompressed_size
+    {
+        return Err(MZError("invalid local file header signature".to_string()));
+    }
+
+    Ok(file_header)
+}
+
+fn file_header_from_global(gfh: JZGlobalFileHeader) -> JZFileHeader {
+    JZFileHeader {
+        compression_method: gfh.compression_method,
+        last_mod_file_time: gfh.last_mod_file_time,
+        last_mod_file_date: gfh.last_mod_file_date,
+        crc32: gfh.crc32,
+        compressed_size: gfh.compressed_size,
+        uncompressed_size: gfh.uncompressed_size,
+        offset: gfh.relative_offset_of_local_header,
+    }
+}
+
 impl<'a> Iterator for ZipIterator<'a> {
     type Item = Result<ZipEntry, MZError>;
 
@@ -225,24 +326,21 @@ impl<'a> Iterator for ZipIterator<'a> {
         }
 
         const FH_SIZE: usize = std::mem::size_of::<JZGlobalFileHeader>();
-
         let mut fh_buff: [u8; FH_SIZE] = [0; FH_SIZE];
-
         if let Err(e) = self.file.read_exact(&mut fh_buff) {
             return Some(Err(e.into()));
         }
-        let file_header: JZGlobalFileHeader =
-            unsafe { std::ptr::read(fh_buff.as_ptr() as *const _) };
 
-        if file_header.signature != JZ_GLOBAL_FILE_HEADER_SIGNATURE {
-            return Some(Err(MZError(
-                "invalid global file header signature".to_string(),
-            )));
+        let file_header = match get_global_file_header(&fh_buff) {
+            Ok(h) => Ok(h),
+            Err(e) => Err(e),
+        };
+
+        if let Err(e) = file_header {
+            return Some(Err(e));
         }
 
-        if file_header.file_name_length as usize + 1 >= JZ_BUFFER_SIZE {
-            return Some(Err(MZError("file name too long".to_string())));
-        }
+        let file_header = file_header.unwrap();
 
         // skip filename and comments
         let skip_len: i64 = file_header.file_name_length as i64
@@ -253,25 +351,13 @@ impl<'a> Iterator for ZipIterator<'a> {
             return Some(Err(e.into()));
         }
 
-        let header = JZFileHeader {
-            compression_method: file_header.compression_method,
-            last_mod_file_time: file_header.last_mod_file_time,
-            last_mod_file_date: file_header.last_mod_file_date,
-            crc32: file_header.crc32,
-            compressed_size: file_header.compressed_size,
-            uncompressed_size: file_header.uncompressed_size,
-            offset: file_header.relative_offset_of_local_header,
-        };
+        let header = file_header_from_global(file_header);
 
         match self.record_callback(&header) {
             Ok(buffer) => {
                 let filename = self.filename.as_ref().unwrap().clone();
                 self.next_entry += 1;
-                Some(Ok(ZipEntry {
-                    header,
-                    buffer,
-                    filename,
-                }))
+                Some(Ok(ZipEntry { buffer, filename }))
             }
             Err(e) => Some(Err(e)),
         }
@@ -279,16 +365,11 @@ impl<'a> Iterator for ZipIterator<'a> {
 }
 
 pub struct ZipEntry {
-    header: JZFileHeader,
     buffer: Vec<u8>,
     filename: String,
 }
 
 impl ZipEntry {
-    pub fn header(&self) -> () {
-        _ = self.header;
-        ()
-    }
     pub fn buffer(&self) -> &Vec<u8> {
         &self.buffer
     }
