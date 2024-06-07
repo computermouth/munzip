@@ -1,3 +1,4 @@
+/// The munzip Error type. Currently not an enum, just a String wrapper.
 #[derive(Debug)]
 pub struct MuError(pub String);
 

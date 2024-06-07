@@ -6,6 +6,24 @@ use std::rc::Rc;
 use crate::shared::*;
 use crate::types::*;
 
+/// An interable for the archive. The iterator will hold the file handle open
+/// and scan for file headers. There are currently small allocations to read these
+/// headers, but the buffer isn't read until requested on the yielded `Entry`.
+///
+/// # Examples
+///
+/// ``` no_run
+/// let zi = munzip::IterableArchive::new(&mut my_file).unwrap();
+///
+/// for entry in zi {
+///     let mut entry = entry.unwrap();
+///
+///     let filename = entry.filename();
+///     let buffer = entry.buffer().unwrap();
+///     
+///     write_file(&filename, &buffer).unwrap();
+/// }
+/// ```
 pub struct IterableArchive<'a> {
     file: Rc<RefCell<&'a mut File>>,
     end_rec: EndRecord,
@@ -64,6 +82,8 @@ impl<'a> Iterator for IterableArchive<'a> {
     }
 }
 
+/// An entry in the archive. An entry may be a file or a directory.
+/// No contents are read until `Entry::buffer()` is invoked.
 pub struct Entry<'a> {
     file: Rc<RefCell<&'a mut File>>,
     header: InternalHeader,
@@ -71,18 +91,19 @@ pub struct Entry<'a> {
 }
 
 impl<'a> Entry<'a> {
+    /// Reads in the compressed data, then decompresses it.
     pub fn buffer(&mut self) -> Result<Vec<u8>, MuError> {
         data_from_internal(&mut *self.file.borrow_mut(), &self.header)
     }
-
+    /// Returns a copy of the Entry's filename
     pub fn filename(&self) -> String {
         self.filename.clone()
     }
-
+    /// Returns the compressed size of the file
     pub fn compressed_size(&self) -> usize {
         self.header.compressed_size as usize
     }
-
+    /// Returns the uncompressed size of the file
     pub fn uncompressed_size(&self) -> usize {
         self.header.uncompressed_size as usize
     }
