@@ -1,5 +1,5 @@
-
-pub struct MZError (pub String);
+#[derive(Debug)]
+pub struct MZError(pub String);
 
 impl std::fmt::Display for MZError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -10,6 +10,18 @@ impl std::fmt::Display for MZError {
 impl From<std::io::Error> for MZError {
     fn from(err: std::io::Error) -> MZError {
         MZError(err.to_string())
+    }
+}
+
+impl From<std::str::Utf8Error> for MZError {
+    fn from(err: std::str::Utf8Error) -> MZError {
+        MZError(err.to_string())
+    }
+}
+
+impl From<String> for MZError {
+    fn from(err: String) -> MZError {
+        MZError(err)
     }
 }
 
@@ -48,7 +60,7 @@ pub struct JZGlobalFileHeader {
     pub disk_number_start: u16,        // unsupported
     pub internal_file_attributes: u16, // unsupported
     pub external_file_attributes: u32, // unsupported
-    pub relative_offset_oflocal_header: u32,
+    pub relative_offset_of_local_header: u32,
 }
 
 #[repr(packed)]
