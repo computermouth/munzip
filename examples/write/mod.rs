@@ -1,15 +1,15 @@
 use std::io::Write;
 use std::path::Path;
 
-use munzip::MZError;
+use munzip::MuError;
 
-pub fn write_file(filename: &String, data: &Vec<u8>) -> Result<(), MZError> {
+pub fn write_file(filename: &String, data: &Vec<u8>) -> Result<(), MuError> {
     let path = Path::new(&filename);
 
     if filename.ends_with("/") {
         if !path.exists() {
             std::fs::create_dir_all(path)
-                .map_err(|_| MZError(format!("failed to create dir '{:?}'", path).to_string()))?;
+                .map_err(|_| MuError(format!("failed to create dir '{:?}'", path).to_string()))?;
         }
         return Ok(());
     }

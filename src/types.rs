@@ -1,33 +1,33 @@
 #[derive(Debug)]
-pub struct MZError(pub String);
+pub struct MuError(pub String);
 
-impl std::fmt::Display for MZError {
+impl std::fmt::Display for MuError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<std::io::Error> for MZError {
-    fn from(err: std::io::Error) -> MZError {
-        MZError(err.to_string())
+impl From<std::io::Error> for MuError {
+    fn from(err: std::io::Error) -> MuError {
+        MuError(err.to_string())
     }
 }
 
-impl From<std::str::Utf8Error> for MZError {
-    fn from(err: std::str::Utf8Error) -> MZError {
-        MZError(err.to_string())
+impl From<std::str::Utf8Error> for MuError {
+    fn from(err: std::str::Utf8Error) -> MuError {
+        MuError(err.to_string())
     }
 }
 
-impl From<String> for MZError {
-    fn from(err: String) -> MZError {
-        MZError(err)
+impl From<String> for MuError {
+    fn from(err: String) -> MuError {
+        MuError(err)
     }
 }
 
 #[repr(packed)]
 #[derive(Debug, Copy, Clone)]
-pub struct JZLocalFileHeader {
+pub struct LocalFileHeader {
     pub signature: u32,                 // 0x04034B50
     pub version_needed_to_extract: u16, // unsupported
     pub general_purpose_bit_flag: u16,  // unsupported
@@ -43,7 +43,7 @@ pub struct JZLocalFileHeader {
 
 #[repr(packed)]
 #[derive(Debug, Copy, Clone)]
-pub struct JZGlobalFileHeader {
+pub struct GlobalFileHeader {
     pub signature: u32,                 // 0x02014B50
     pub version_made_by: u16,           // unsupported
     pub version_needed_to_extract: u16, // unsupported
@@ -65,19 +65,7 @@ pub struct JZGlobalFileHeader {
 
 #[repr(packed)]
 #[derive(Debug, Copy, Clone)]
-pub struct JZFileHeader {
-    pub compression_method: u16,
-    pub last_mod_file_time: u16,
-    pub last_mod_file_date: u16,
-    pub crc32: u32,
-    pub compressed_size: u32,
-    pub uncompressed_size: u32,
-    pub offset: u32,
-}
-
-#[repr(packed)]
-#[derive(Debug)]
-pub struct JZInternalHeader {
+pub struct InternalHeader {
     pub compressed_size: u32,
     pub uncompressed_size: u32,
     pub compression_method: u16,
@@ -86,7 +74,7 @@ pub struct JZInternalHeader {
 
 #[repr(packed)]
 #[derive(Debug, Copy, Clone)]
-pub struct JZEndRecord {
+pub struct EndRecord {
     pub signature: u32,
     pub disk_number: u16,
     pub central_directory_disk_number: u16,
