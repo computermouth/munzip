@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -12,7 +13,6 @@ const JZ_LOCAL_FILE_HEADER_SIGNATURE: u32 = 0x04034B50;
 
 // Read ZIP file end record. Will move within file.
 fn jz_read_end_record(zip: &mut File) -> Result<JZEndRecord, MZError> {
-
     zip.seek(SeekFrom::End(0))?;
     let file_size = zip.stream_position()?;
 
@@ -130,6 +130,39 @@ fn jz_read_local_file_header_raw(zip: &mut File) -> Result<(JZLocalFileHeader, S
     Ok((header, filename))
 }
 
+pub struct Archive<'a> {
+    file: &'a mut File,
+    map: Option<HashMap<String, u16>>,
+    end_rec: JZEndRecord,
+}
+
+impl<'a> Archive<'a> {
+    pub fn new(file: &'a mut File) -> Result<Self, MZError> {
+        let end_rec = jz_read_end_record(file)?;
+
+        file.seek(SeekFrom::Start(end_rec.central_directory_offset as u64))?;
+
+        Ok(Self {
+            file,
+            map: None,
+            end_rec,
+        })
+    }
+
+    fn build_map(&mut self) -> Result<(), MZError> {
+        let map = HashMap::new();
+
+        self.map = Some(map);
+        Ok(())
+    }
+
+    pub fn by_name(&mut self) -> Result<Option<Vec<u8>>, MZError> {
+        if self.map == None {}
+
+        Ok(None)
+    }
+}
+
 pub struct ZipIterator<'a> {
     file: &'a mut File,
     filename: Option<String>,
@@ -183,7 +216,6 @@ impl<'a> Iterator for ZipIterator<'a> {
     type Item = Result<ZipEntry, MZError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        
         if self.next_entry > self.end_rec.num_entries {
             panic!("wtf");
         }
@@ -212,22 +244,12 @@ impl<'a> Iterator for ZipIterator<'a> {
             return Some(Err(MZError("file name too long".to_string())));
         }
 
-        let mut buf = vec![0; file_header.file_name_length as usize];
-        if let Err(e) = self.file.read(&mut buf) {
-            return Some(Err(e.into()));
-        }
+        // skip filename and comments
+        let skip_len: i64 = file_header.file_name_length as i64
+            + file_header.extra_field_length as i64
+            + file_header.file_comment_length as i64;
 
-        // skip comments
-        if let Err(e) = self
-            .file
-            .seek(SeekFrom::Current(file_header.extra_field_length as i64))
-        {
-            return Some(Err(e.into()));
-        }
-        if let Err(e) = self
-            .file
-            .seek(SeekFrom::Current(file_header.file_comment_length as i64))
-        {
+        if let Err(e) = self.file.seek(SeekFrom::Current(skip_len)) {
             return Some(Err(e.into()));
         }
 
@@ -243,7 +265,6 @@ impl<'a> Iterator for ZipIterator<'a> {
 
         match self.record_callback(&header) {
             Ok(buffer) => {
-                // yo wtf is this
                 let filename = self.filename.as_ref().unwrap().clone();
                 self.next_entry += 1;
                 Some(Ok(ZipEntry {
