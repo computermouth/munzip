@@ -10,26 +10,24 @@ While **JUnzip** supports `STORE`, and optionally `DEFLATE` and/or `ZLIB`, **mμ
 [iterable](examples/iterate.rs)
 
 ```rust
-    let zi = munzip::IterableArchive::new(&mut input).unwrap();
+let zi = munzip::IterableArchive::new(&mut input).unwrap();
 
-    for entry in zi {
-        let mut entry = entry.unwrap();
-
-        let filename = entry.filename();
-        let buffer = entry.buffer().unwrap();
-
-        write::write_file(&filename, &buffer).unwrap();
-    }
+for entry in zi {
+    let mut entry = entry.unwrap();
+    let filename = entry.filename();
+    let buffer = entry.buffer().unwrap();
+    write::write_file(&filename, &buffer).unwrap();
+}
 ```
 
 [searchable](examples/search.rs)
 
 ```rust
-    let mut zi = munzip::SearchableArchive::new(&mut input).unwrap();
+let mut zi = munzip::SearchableArchive::new(&mut input).unwrap();
 
-    let filename = "munzip/Cargo.toml";
-    let cargo_toml = zi.by_name(filename).unwrap().unwrap();
-    write::write_file(&"Cargo.toml".to_owned(), &cargo_toml).unwrap();
+let filename = "munzip/Cargo.toml";
+let cargo_toml = zi.by_name(filename).unwrap().unwrap();
+write::write_file(&"Cargo.toml".to_owned(), &cargo_toml).unwrap();
 ```
 
 ### why?
