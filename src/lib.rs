@@ -1,30 +1,20 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::{Mutex, OnceLock};
-
-use inflate;
 
 mod types;
-use types::*;
 pub use types::MZError;
+use types::*;
 
 const JZ_BUFFER_SIZE: usize = 65536;
 const JZ_END_RECORD_SIGNATURE: u32 = 0x06054B50;
 const JZ_GLOBAL_FILE_HEADER_SIGNATURE: u32 = 0x02014B50;
 const JZ_LOCAL_FILE_HEADER_SIGNATURE: u32 = 0x04034B50;
 
-fn buffer() -> &'static Mutex<[u8; JZ_BUFFER_SIZE]> {
-    static STORES: OnceLock<Mutex<[u8; JZ_BUFFER_SIZE]>> = OnceLock::new();
-    STORES.get_or_init(|| std::sync::Mutex::new([0; JZ_BUFFER_SIZE]))
-}
-
 // Read ZIP file end record. Will move within file.
 fn jz_read_end_record(zip: &mut File) -> Result<JZEndRecord, MZError> {
-    let file_size: u64;
-    let mut jz_buffer = buffer().lock().unwrap();
 
     zip.seek(SeekFrom::End(0))?;
-    file_size = zip.seek(SeekFrom::Current(0))?;
+    let file_size = zip.stream_position()?;
 
     if file_size <= std::mem::size_of::<JZEndRecord>() as u64 {
         return Err(MZError("input file too small".to_string()));
@@ -41,13 +31,13 @@ fn jz_read_end_record(zip: &mut File) -> Result<JZEndRecord, MZError> {
     zip.seek(SeekFrom::Start(file_size - read_bytes))?;
 
     // Read the end of the file into a buffer
-    let mut buffer_slice = &mut jz_buffer[..read_bytes as usize];
-    zip.read_exact(&mut buffer_slice)?;
+    let mut buf = vec![0; read_bytes as usize];
+    zip.read_exact(&mut buf)?;
 
     let mut er: Option<&[u8]> = None;
     let record_sz = std::mem::size_of::<JZEndRecord>();
-    for i in (0..=buffer_slice.len() - record_sz).rev() {
-        let node = &buffer_slice[i..i + record_sz];
+    for i in (0..=buf.len() - record_sz).rev() {
+        let node = &buf[i..i + record_sz];
         // signature is the first u32
         let sig: u32 = (node[3] as u32) << 24
             | (node[2] as u32) << 16
@@ -163,7 +153,7 @@ impl<'a> ZipIterator<'a> {
     }
 
     fn record_callback(&mut self, header: &JZFileHeader) -> Result<Vec<u8>, MZError> {
-        let offset = self.file.seek(SeekFrom::Current(0))?;
+        let offset = self.file.stream_position()?;
         self.file.seek(SeekFrom::Start(header.offset as u64))?;
 
         // process_file
@@ -203,7 +193,6 @@ impl<'a> Iterator for ZipIterator<'a> {
         }
 
         const FH_SIZE: usize = std::mem::size_of::<JZGlobalFileHeader>();
-        let mut jz_buffer = buffer().lock().unwrap();
 
         let mut fh_buff: [u8; FH_SIZE] = [0; FH_SIZE];
 
@@ -227,10 +216,6 @@ impl<'a> Iterator for ZipIterator<'a> {
         if let Err(e) = self.file.read(&mut buf) {
             return Some(Err(e.into()));
         }
-
-        jz_buffer[..buf.len()].clone_from_slice(&buf);
-        // null terminator, probably not necessary
-        jz_buffer[buf.len()] = 0;
 
         // skip comments
         if let Err(e) = self
@@ -267,7 +252,7 @@ impl<'a> Iterator for ZipIterator<'a> {
                     filename,
                 }))
             }
-            Err(e) => Some(Err(e.into())),
+            Err(e) => Some(Err(e)),
         }
     }
 }
