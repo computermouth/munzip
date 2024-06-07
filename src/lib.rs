@@ -1,13 +1,12 @@
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Mutex, OnceLock};
 
 use inflate;
 
-mod time;
 mod types;
 use types::*;
+pub use types::MZError;
 
 const JZ_BUFFER_SIZE: usize = 65536;
 const JZ_END_RECORD_SIGNATURE: u32 = 0x06054B50;
@@ -76,104 +75,6 @@ fn jz_read_end_record(zip: &mut File) -> Result<JZEndRecord, MZError> {
     Ok(end_record)
 }
 
-// todo, yield the iterator
-fn jz_read_central_directory(zip: &mut File, er: &JZEndRecord) -> Result<(), MZError> {
-    const FH_SIZE: usize = std::mem::size_of::<JZGlobalFileHeader>();
-    let mut jz_buffer = buffer().lock().unwrap();
-
-    zip.seek(SeekFrom::Start(er.central_directory_offset as u64))?;
-
-    for i in 0..er.num_entries {
-        let mut fh_buff: [u8; FH_SIZE] = [0; FH_SIZE];
-
-        zip.read_exact(&mut fh_buff)?;
-        let file_header: JZGlobalFileHeader =
-            unsafe { std::ptr::read(fh_buff.as_ptr() as *const _) };
-
-        if file_header.signature != JZ_GLOBAL_FILE_HEADER_SIGNATURE {
-            return Err(MZError("invalid global file header signature".to_string()));
-        }
-
-        if file_header.file_name_length as usize + 1 >= JZ_BUFFER_SIZE {
-            return Err(MZError("file name too long".to_string()));
-        }
-
-        let mut buf = vec![0; file_header.file_name_length as usize];
-        zip.read(&mut buf)?;
-
-        jz_buffer[..buf.len()].clone_from_slice(&buf);
-        // null terminator, probably not necessary
-        jz_buffer[buf.len()] = 0;
-
-        // skip comments
-        zip.seek(SeekFrom::Current(file_header.extra_field_length as i64))?;
-        zip.seek(SeekFrom::Current(file_header.file_comment_length as i64))?;
-
-        let header = JZFileHeader {
-            compression_method: file_header.compression_method,
-            last_mod_file_time: file_header.last_mod_file_time,
-            last_mod_file_date: file_header.last_mod_file_date,
-            crc32: file_header.crc32,
-            compressed_size: file_header.compressed_size,
-            uncompressed_size: file_header.uncompressed_size,
-            offset: file_header.relative_offset_of_local_header,
-        };
-
-        record_callback(zip, &header)?
-    }
-
-    Ok(())
-}
-
-fn record_callback(zip: &mut File, header: &JZFileHeader) -> Result<(), MZError> {
-    let offset = zip.seek(SeekFrom::Current(0))?;
-    zip.seek(SeekFrom::Start(header.offset as u64))?;
-
-    // process_file
-    process_file(zip)?;
-
-    zip.seek(SeekFrom::Start(offset))?;
-
-    Ok(())
-}
-
-fn process_file(zip: &mut File) -> Result<(), MZError> {
-    let (header, filename) = jz_read_local_file_header(zip)?;
-
-    let cs = header.compressed_size;
-    let us = header.uncompressed_size;
-    let of = header.offset;
-    eprintln!("{}, {} / {} bytes at offset {:x}", filename, cs, us, of);
-
-    let data = jz_read_data(zip, &header)?;
-
-    write_file(filename, data)?;
-
-    Ok(())
-}
-
-fn write_file(filename: String, data: Vec<u8>) -> Result<(), MZError> {
-    let path = Path::new(&filename);
-
-    if filename.ends_with("/") {
-        if !path.exists() {
-            std::fs::create_dir_all(path)
-                .map_err(|_| MZError(format!("failed to create dir '{:?}'", path).to_string()))?;
-        }
-        return Ok(());
-    }
-
-    // is a dir, or empty filename
-    if path.ends_with("/") || path == Path::new("") {
-        return Ok(());
-    }
-
-    let mut file = std::fs::File::create(path).unwrap();
-    file.write_all(&data).unwrap();
-
-    Ok(())
-}
-
 fn jz_read_data(zip: &mut File, header: &JZFileHeader) -> Result<Vec<u8>, MZError> {
     let dst_len = header.uncompressed_size;
     let src_len = header.compressed_size;
@@ -239,7 +140,7 @@ fn jz_read_local_file_header_raw(zip: &mut File) -> Result<(JZLocalFileHeader, S
     Ok((header, filename))
 }
 
-struct ZipIterator<'a> {
+pub struct ZipIterator<'a> {
     file: &'a mut File,
     filename: Option<String>,
     end_rec: JZEndRecord,
@@ -371,30 +272,21 @@ impl<'a> Iterator for ZipIterator<'a> {
     }
 }
 
-struct ZipEntry {
+pub struct ZipEntry {
     header: JZFileHeader,
     buffer: Vec<u8>,
     filename: String,
 }
 
-fn main() {
-    let mut args = std::env::args();
-    if args.len() != 2 {
-        eprintln!("{} <FILE>", args.nth(0).unwrap());
-        return;
+impl ZipEntry {
+    pub fn header(&self) -> () {
+        _ = self.header;
+        ()
     }
-
-    let mut input = File::open(args.nth(1).unwrap()).unwrap();
-    let zi = ZipIterator::new(&mut input).unwrap();
-
-    for item in zi {
-        let item = item.unwrap();
-
-        write_file(item.filename, item.buffer).unwrap();
+    pub fn buffer(&self) -> &Vec<u8> {
+        &self.buffer
     }
-
-    // let er = jz_read_end_record(&mut input).unwrap();
-    // jz_read_central_directory(&mut input, &er).unwrap();
-
-    println!("Hello, world!");
+    pub fn filename(&self) -> &String {
+        &self.filename
+    }
 }
